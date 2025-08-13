@@ -534,6 +534,9 @@
 
             // Create game objects
             monkey = new Monkey(canvas.width / 2, canvas.height - 50);
+            
+            // Initialize camera to show the ghost properly on mobile
+            cameraY = canvas.height - canvas.height * 0.8;
             platforms = [];
             collectibles = [];
             
@@ -675,8 +678,10 @@
                 }
             }
 
-            // Update camera and score
-            cameraY = Math.min(cameraY, monkey.y - canvas.height * 0.4);
+            // Update camera and score  
+            // Ensure camera follows the ghost properly, keeping it visible
+            const targetCameraY = monkey.y - canvas.height * 0.6;
+            cameraY = Math.min(cameraY, targetCameraY);
             const currentHeight = Math.max(0, Math.floor((canvas.height - monkey.y) / 10));
             score = Math.max(score, currentHeight);
 
