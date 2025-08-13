@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost Jumper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Luckiest Guy', cursive;
+            background-color: #1a202c;
+            overflow: hidden;
+            touch-action: none; /* Prevents scrolling on mobile */
+        }
+        canvas {
+            background-color: #0B1426; /* Dark night sky */
+            display: block;
+            cursor: pointer;
+        }
+        .text-stroke {
+            -webkit-text-stroke: 2px black;
+            text-shadow: 4px 4px 0 #000;
+        }
+        .hidden {
+            display: none;
+        }
+        /* Mobile-specific styles */
+        @media (max-width: 768px) {
+            .desktop-controls {
+                display: none;
+            }
+            .mobile-controls {
+                display: inline !important;
+            }
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center h-screen bg-green-900">
+
+    <div id="game-container" class="relative w-full max-w-md aspect-[9/16] rounded-2xl overflow-hidden shadow-2xl border-4 border-yellow-900/50">
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- UI Elements -->
+        <div id="ui-container" class="absolute inset-0 p-4 md:p-6 text-white pointer-events-none">
+            <!-- Score Display -->
+            <div id="score-display" class="absolute top-4 left-4 text-3xl md:text-4xl text-stroke transition-opacity duration-300 opacity-0">
+                <span id="height-score">0</span>m
+            </div>
+            <div id="banana-display" class="absolute top-4 right-4 text-3xl md:text-4xl text-stroke transition-opacity duration-300 opacity-0">
+                🍌 <span id="banana-score">0</span>
+            </div>
+
+            <!-- Start Screen -->
+            <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50 transition-opacity duration-500">
+                <h1 class="text-6xl md:text-8xl text-yellow-300 text-stroke text-center">Ghost Jumper</h1>
+                <p class="text-xl md:text-2xl mt-4 text-center px-4" id="control-instructions">
+                    <span class="desktop-controls">Arrow Keys to Move.<br>Up Arrow to Jump (twice for double jump)!</span>
+                    <span class="mobile-controls hidden">Tilt to Move.<br>Tap to Jump (twice for double jump)!</span>
+                </p>
+                <button id="start-button" class="mt-8 px-8 py-4 bg-green-500 hover:bg-green-600 text-3xl rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all pointer-events-auto">
+                    Play
+                </button>
+            </div>
+
+            <!-- Game Over Screen -->
+            <div id="game-over-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50 opacity-0 pointer-events-none transition-opacity duration-500">
+                <h2 class="text-6xl md:text-7xl text-red-500 text-stroke">Game Over</h2>
+                <div class="text-center mt-6 text-2xl md:text-3xl space-y-2">
+                    <p>Height: <span id="final-height">0</span>m</p>
+                    <p>Bananas: 🍌<span id="final-bananas">0</span></p>
+                    <p class="text-yellow-300">High Score: <span id="high-score">0</span>m</p>
+                </div>
+                <button id="retry-button" class="mt-8 px-8 py-4 bg-green-500 hover:bg-green-600 text-3xl rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all pointer-events-auto">
+                    Retry
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('game-container');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const startButton = document.getElementById('start-button');
+        const retryButton = document.getElementById('retry-button');
+        const scoreDisplay = document.getElementById('score-display');
+        const bananaDisplay = document.getElementById('banana-display');
+        const heightScoreEl = document.getElementById('height-score');
+        const bananaScoreEl = document.getElementById('banana-score');
+        const finalHeightEl = document.getElementById('final-height');
+        const finalBananasEl = document.getElementById('final-bananas');
+        const highScoreEl = document.getElementById('high-score');
+
+        // --- Game State & Config ---
+        let gameState = 'menu'; // 'menu', 'playing', 'gameOver'
+        let monkey, platforms, collectibles, parallaxLayers;
+        let cameraY = 0;
+        let score = 0;
+        let bananaCount = 0;
+        let highScore = localStorage.getItem('jungleJumperHighScore') || 0;
+        let powerUpActive = false;
+        let powerUpTimer = 0;
+        let jetpackActive = false;
+        let jetpackTimer = 0;
+        let isInitialized = false; // Flag to check if init has run
+
+        const MONKEY_SIZE = 30;
+        const GRAVITY = 0.4;
+        const JUMP_FORCE = 11;
+        const MOVE_SPEED = 4;
+        const POWER_UP_DURATION = 300; // 5 seconds at 60fps
+        const JETPACK_DURATION = 120; // 2 seconds at 60fps
+        const JETPACK_FORCE = -0.8; // Upward force when jetpack is active
+
+        // --- Input Handling ---
+        const keys = {
+            left: false,
+            right: false,
+            up: false
+        };
+        
+        // Mobile controls
+        let tiltSensitivity = 3; // Adjust for tilt responsiveness
+        let deviceOrientation = { gamma: 0 }; // Device tilt data
+        let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        // --- Game Object Classes ---
+        class Monkey {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.width = MONKEY_SIZE;
+                this.height = MONKEY_SIZE;
+                this.dx = 0;
+                this.dy = 0;
+                this.onPlatform = true;
+                this.rotation = 0;
+                this.jumpsLeft = 2; // Add jump counter
+            }
+
+            jump() {
+                // Allow jumping if there are jumps left
+                if (this.jumpsLeft > 0) {
+                    this.dy = -JUMP_FORCE;
+                    this.onPlatform = false; // Monkey is in the air after any jump
+                    this.jumpsLeft--;
+                }
+            }
+
+            update() {
+                // Horizontal movement based on key presses or device tilt
+                if (isMobile) {
+                    // Use device tilt for mobile
+                    const tiltValue = deviceOrientation.gamma || 0;
+                    if (Math.abs(tiltValue) > 5) { // Dead zone to prevent jitter
+                        this.dx = (tiltValue / 30) * MOVE_SPEED; // Scale tilt to movement
+                        this.dx = Math.max(-MOVE_SPEED, Math.min(MOVE_SPEED, this.dx)); // Clamp speed
+                    } else {
+                        this.dx = 0;
+                    }
+                } else {
+                    // Use keyboard for desktop
+                    if (keys.left) {
+                        this.dx = -MOVE_SPEED;
+                    } else if (keys.right) {
+                        this.dx = MOVE_SPEED;
+                    } else {
+                        this.dx = 0;
+                    }
+                }
+                this.x += this.dx;
+
+                // Apply gravity (reduced if jetpack is active)
+                if (jetpackActive) {
+                    this.dy += GRAVITY + JETPACK_FORCE; // Jetpack counters gravity
+                } else {
+                    this.dy += GRAVITY;
+                }
+                this.y += this.dy;
+
+                // Rotation for visual flair
+                if (!this.onPlatform) {
+                    this.rotation += this.dx * 0.05;
+                } else {
+                    this.rotation = 0;
+                }
+
+                // Screen bounds (wrapping)
+                if (this.x < -this.width / 2) this.x = canvas.width + this.width / 2;
+                if (this.x > canvas.width + this.width / 2) this.x = -this.width / 2;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+
+                const ghostColor = '#F0F8FF'; // Alice Blue (pale ghost color)
+                const shadowColor = '#E6E6FA'; // Lavender (slightly darker)
+                const eyeColor = '#000000'; // Black
+                const mouthColor = '#000000'; // Black
+
+                // Ghost body (main oval shape)
+                ctx.fillStyle = ghostColor;
+                ctx.beginPath();
+                ctx.arc(0, 0, this.width / 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Ghost bottom wavy edge
+                ctx.fillStyle = ghostColor;
+                ctx.beginPath();
+                ctx.moveTo(-this.width / 2, this.height / 4);
+                ctx.lineTo(-this.width / 2, this.height / 2);
+                ctx.lineTo(-this.width / 4, this.height / 3);
+                ctx.lineTo(0, this.height / 2);
+                ctx.lineTo(this.width / 4, this.height / 3);
+                ctx.lineTo(this.width / 2, this.height / 2);
+                ctx.lineTo(this.width / 2, this.height / 4);
+                ctx.arc(0, 0, this.width / 2, 0, Math.PI, false);
+                ctx.fill();
+
+                // Eyes (larger and more expressive)
+                ctx.fillStyle = eyeColor;
+                ctx.beginPath();
+                ctx.arc(-this.width / 6, -this.height / 8, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(this.width / 6, -this.height / 8, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Mouth (open 'O' shape)
+                ctx.fillStyle = mouthColor;
+                ctx.beginPath();
+                ctx.arc(0, this.height / 8, this.width / 8, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Inner mouth (to make it look hollow)
+                ctx.fillStyle = '#333333';
+                ctx.beginPath();
+                ctx.arc(0, this.height / 8, this.width / 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Subtle glow effect
+                ctx.shadowColor = 'rgba(240, 248, 255, 0.3)';
+                ctx.shadowBlur = 8;
+                ctx.fillStyle = 'rgba(240, 248, 255, 0.1)';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.width / 2 + 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        class Platform {
+            constructor(x, y, width, type) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = 20;
+                this.type = type; // 'static', 'moving', 'crumbling', 'jetpack', 'disappearing', 'conveyor', 'trampoline'
+                this.state = 0; // for crumbling
+                // Speed increases with height/difficulty
+                const difficulty = Math.max(0, Math.floor(-y / 500));
+                const baseSpeed = (Math.random() - 0.5) * 2 + 1;
+                this.speed = baseSpeed * (1 + difficulty * 0.3); // 30% faster per difficulty level
+                this.jetpackUsed = false; // for jetpack platforms
+                
+                // For disappearing platforms
+                this.fadeTimer = 0;
+                this.fadeCycle = 240; // 4 seconds at 60fps
+                this.isVisible = true;
+                
+                // For conveyor platforms
+                this.conveyorDirection = Math.random() > 0.5 ? 1 : -1; // 1 for right, -1 for left
+                this.conveyorSpeed = 1.5;
+                
+                // For trampoline platforms
+                this.bounceAnimation = 0; // Animation frame for bounce visual
+            }
+
+            update() {
+                if (this.type === 'moving') {
+                    this.x += this.speed;
+                    if (this.x < 0 || this.x + this.width > canvas.width) {
+                        this.speed *= -1;
+                    }
+                }
+                if (this.type === 'crumbling' && this.state > 0) {
+                    this.state--;
+                    if (this.state === 0) {
+                        this.y += canvas.height * 2; // "Remove" it by moving it offscreen
+                    }
+                }
+                if (this.type === 'disappearing') {
+                    this.fadeTimer++;
+                    // Visible for 3 seconds, invisible for 1 second
+                    if (this.fadeTimer < 180) { // 3 seconds visible
+                        this.isVisible = true;
+                    } else if (this.fadeTimer < 240) { // 1 second invisible
+                        this.isVisible = false;
+                    } else {
+                        this.fadeTimer = 0; // Reset cycle
+                    }
+                }
+                if (this.type === 'trampoline' && this.bounceAnimation > 0) {
+                    this.bounceAnimation--; // Decrease bounce animation timer
+                }
+            }
+
+            draw() {
+                // Don't draw disappearing platforms when invisible
+                if (this.type === 'disappearing' && !this.isVisible) {
+                    return;
+                }
+                
+                if (this.type === 'static') {
+                    ctx.fillStyle = '#C0C0C0'; // Silver/Light Grey
+                } else if (this.type === 'moving') {
+                    ctx.fillStyle = '#D8BFD8'; // Thistle (pastel purple)
+                } else if (this.type === 'crumbling') {
+                    const alpha = Math.max(0.2, this.state / 120);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`; // White with alpha
+                } else if (this.type === 'jetpack') {
+                    if (this.jetpackUsed) {
+                        ctx.fillStyle = '#808080'; // Dark grey when used
+                    } else {
+                        ctx.fillStyle = '#FFB6C1'; // Light pink for jetpack platforms
+                    }
+                } else if (this.type === 'disappearing') {
+                    // Fade warning when about to disappear
+                    const timeLeft = 180 - this.fadeTimer;
+                    if (timeLeft < 60) { // Start flashing in last second
+                        const alpha = 0.3 + 0.7 * (timeLeft / 60);
+                        ctx.fillStyle = `rgba(135, 206, 235, ${alpha})`; // Sky blue with fade
+                    } else {
+                        ctx.fillStyle = '#87CEEB'; // Sky blue
+                    }
+                } else if (this.type === 'conveyor') {
+                    ctx.fillStyle = '#DDA0DD'; // Plum color for conveyor
+                } else if (this.type === 'trampoline') {
+                    ctx.fillStyle = '#FF69B4'; // Hot pink for trampoline base
+                }
+                
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                // Add some detail
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(this.x, this.y, this.width, 5);
+                
+                // Draw platform-specific indicators
+                if (this.type === 'jetpack' && !this.jetpackUsed) {
+                    ctx.font = '20px serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    ctx.fillText('🚀', this.x + this.width/2, this.y - 5);
+                } else if (this.type === 'conveyor') {
+                    // Draw arrow indicating conveyor direction
+                    ctx.fillStyle = '#4B0082'; // Indigo arrows
+                    const centerX = this.x + this.width/2;
+                    const centerY = this.y + this.height/2;
+                    const arrowSize = 6;
+                    
+                    if (this.conveyorDirection > 0) { // Right arrow
+                        ctx.beginPath();
+                        ctx.moveTo(centerX - arrowSize, centerY - arrowSize/2);
+                        ctx.lineTo(centerX + arrowSize, centerY);
+                        ctx.lineTo(centerX - arrowSize, centerY + arrowSize/2);
+                        ctx.fill();
+                    } else { // Left arrow
+                        ctx.beginPath();
+                        ctx.moveTo(centerX + arrowSize, centerY - arrowSize/2);
+                        ctx.lineTo(centerX - arrowSize, centerY);
+                        ctx.lineTo(centerX + arrowSize, centerY + arrowSize/2);
+                        ctx.fill();
+                    }
+                } else if (this.type === 'trampoline') {
+                    // Draw trampoline spring/coil
+                    const centerX = this.x + this.width/2;
+                    const springHeight = this.bounceAnimation > 0 ? 8 - (this.bounceAnimation / 5) : 8;
+                    
+                    // Spring coils
+                    ctx.strokeStyle = '#8B0000'; // Dark red springs
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < 3; i++) {
+                        const springX = centerX - 8 + (i * 8);
+                        ctx.beginPath();
+                        ctx.moveTo(springX, this.y);
+                        ctx.lineTo(springX, this.y - springHeight);
+                        ctx.stroke();
+                    }
+                    
+                    // Trampoline surface (bouncing pad)
+                    const surfaceY = this.y - springHeight - 2;
+                    ctx.fillStyle = '#000000'; // Black surface
+                    ctx.fillRect(this.x + 5, surfaceY, this.width - 10, 3);
+                }
+            }
+        }
+        
+        class Collectible {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // 'banana', 'pineapple'
+                this.size = type === 'banana' ? 20 : 30;
+                this.collected = false;
+            }
+
+            update() {
+                if (powerUpActive && this.type === 'banana') {
+                    // Magnetic effect
+                    const distX = monkey.x - this.x;
+                    const distY = monkey.y - this.y;
+                    const dist = Math.sqrt(distX * distX + distY * distY);
+                    if (dist < 100) {
+                        this.x += distX / dist * 5;
+                        this.y += distY / dist * 5;
+                    }
+                }
+            }
+
+            draw() {
+                ctx.font = `${this.size}px serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.type === 'banana' ? '🍌' : '🍍', this.x, this.y);
+            }
+        }
+
+        class ParallaxLayer {
+            constructor(y, height, speed, color) {
+                this.y = y;
+                this.height = height;
+                this.speed = speed;
+                this.color = color;
+            }
+
+            draw(cameraY) {
+                ctx.fillStyle = this.color;
+                // Calculate position based on camera, creating parallax effect
+                const yPos = this.y - (cameraY * this.speed);
+                ctx.fillRect(0, yPos, canvas.width, this.height);
+            }
+        }
+
+
+        // --- Game Logic Functions ---
+        function drawGraveyardElements() {
+            // Only draw graveyard elements at the bottom of the screen
+            if (cameraY > -canvas.height) {
+                // Tombstones
+                const tombstones = [
+                    {x: 50, y: canvas.height - 40, width: 20, height: 35},
+                    {x: 120, y: canvas.height - 45, width: 25, height: 40},
+                    {x: 200, y: canvas.height - 38, width: 18, height: 33},
+                    {x: 280, y: canvas.height - 42, width: 22, height: 37},
+                ];
+                
+                tombstones.forEach(tomb => {
+                    // Tombstone body
+                    ctx.fillStyle = '#696969'; // Dim gray
+                    ctx.fillRect(tomb.x, tomb.y, tomb.width, tomb.height);
+                    
+                    // Rounded top
+                    ctx.beginPath();
+                    ctx.arc(tomb.x + tomb.width/2, tomb.y, tomb.width/2, Math.PI, 0);
+                    ctx.fill();
+                    
+                    // Cross or RIP text
+                    ctx.fillStyle = '#2F2F2F';
+                    ctx.fillRect(tomb.x + tomb.width/2 - 1, tomb.y + 8, 2, 12);
+                    ctx.fillRect(tomb.x + tomb.width/2 - 4, tomb.y + 12, 8, 2);
+                });
+                
+                // Dead grass patches
+                ctx.fillStyle = '#228B22';
+                for (let i = 0; i < 15; i++) {
+                    const x = (i * 31) % canvas.width;
+                    const grassHeight = 3 + Math.random() * 4;
+                    ctx.fillRect(x, canvas.height - grassHeight, 2, grassHeight);
+                }
+                
+                // Bare tree silhouettes
+                ctx.strokeStyle = '#2F2F2F';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                // Tree 1
+                ctx.moveTo(30, canvas.height);
+                ctx.lineTo(30, canvas.height - 60);
+                ctx.lineTo(20, canvas.height - 45);
+                ctx.moveTo(30, canvas.height - 45);
+                ctx.lineTo(40, canvas.height - 50);
+                // Tree 2
+                ctx.moveTo(canvas.width - 40, canvas.height);
+                ctx.lineTo(canvas.width - 40, canvas.height - 70);
+                ctx.lineTo(canvas.width - 50, canvas.height - 55);
+                ctx.moveTo(canvas.width - 40, canvas.height - 50);
+                ctx.lineTo(canvas.width - 30, canvas.height - 60);
+                ctx.stroke();
+            }
+        }
+
+        function drawStars() {
+            ctx.fillStyle = '#FFFFFF';
+            // Create a pseudo-random star field that moves with camera
+            for (let i = 0; i < 100; i++) {
+                const x = (i * 47) % canvas.width; // Pseudo-random x
+                const y = ((i * 73) % (canvas.height * 3)) + (cameraY * 0.1); // Slow parallax effect
+                const size = (i % 3) + 1; // Star size 1-3
+                const alpha = 0.3 + (i % 7) * 0.1; // Varying brightness
+                
+                ctx.globalAlpha = alpha;
+                ctx.fillRect(x, y % (canvas.height + 200) - 100, size, size);
+            }
+            ctx.globalAlpha = 1; // Reset alpha
+        }
+
+        function init() {
+            // Reset game variables
+            cameraY = 0;
+            score = 0;
+            bananaCount = 0;
+            powerUpActive = false;
+            powerUpTimer = 0;
+            jetpackActive = false;
+            jetpackTimer = 0;
+
+            // Create game objects
+            monkey = new Monkey(canvas.width / 2, canvas.height - 50);
+            platforms = [];
+            collectibles = [];
+            
+            // Starting platform
+            platforms.push(new Platform(canvas.width / 2 - 50, canvas.height - 30, 100, 'static'));
+            
+            // Procedurally generate initial platforms
+            let lastY = canvas.height - 30;
+            for (let i = 0; i < 20; i++) {
+                // Increase spacing with height
+                const difficulty = Math.max(0, Math.floor(-lastY / 500));
+                const minSpacing = Math.min(120, 60 + difficulty * 10);
+                const maxSpacing = Math.min(180, 80 + difficulty * 15);
+                lastY -= (Math.random() * (maxSpacing - minSpacing) + minSpacing);
+                generatePlatform(lastY);
+            }
+
+            // Parallax background
+            parallaxLayers = [
+                new ParallaxLayer(0, canvas.height, 0.1, '#0B1426'), // Deep night sky
+                new ParallaxLayer(canvas.height - 200, 200, 0.3, '#2F4F2F'), // Dark forest background
+                new ParallaxLayer(canvas.height - 100, 100, 0.5, '#1C1C1C'), // Dark hills
+                new ParallaxLayer(canvas.height - 50, 50, 0.8, '#0A0A0A'), // Graveyard ground
+            ];
+
+            updateScoreUI();
+            isInitialized = true; // Mark as initialized
+        }
+
+        function generatePlatform(y) {
+            // Calculate difficulty based on height (higher = harder)
+            const difficulty = Math.max(0, Math.floor(-y / 500)); // Difficulty increases every 500px up
+            
+            // Platform width decreases with difficulty (min 30px)
+            const minWidth = Math.max(30, 80 - difficulty * 5);
+            const maxWidth = Math.max(minWidth + 20, 100 - difficulty * 5);
+            const width = Math.random() * (maxWidth - minWidth) + minWidth;
+            
+            const x = Math.random() * (canvas.width - width);
+            let type = 'static';
+            const rand = Math.random();
+            
+            // Increase special platform chances with difficulty
+            const crumblingThreshold = Math.max(0.25, 0.5 - difficulty * 0.05);
+            const movingThreshold = Math.max(0.4, 0.65 - difficulty * 0.03);
+            const disappearingThreshold = Math.max(0.65, 0.85 - difficulty * 0.02);
+            const conveyorThreshold = Math.max(0.75, 0.9 - difficulty * 0.015);
+            const trampolineThreshold = Math.max(0.88, 0.95 - difficulty * 0.01);
+            
+            if (rand > 0.99) type = 'jetpack';
+            else if (rand > trampolineThreshold) type = 'trampoline';
+            else if (rand > conveyorThreshold) type = 'conveyor';
+            else if (rand > disappearingThreshold) type = 'disappearing';
+            else if (rand > movingThreshold) type = 'moving';
+            else if (rand > crumblingThreshold) type = 'crumbling';
+
+            platforms.push(new Platform(x, y, width, type));
+
+            // Occasionally add a collectible
+            if (Math.random() > 0.6) {
+                const collectibleType = Math.random() > 0.9 ? 'pineapple' : 'banana';
+                collectibles.push(new Collectible(x + width / 2, y - 20, collectibleType));
+            }
+        }
+
+        function update() {
+            if (gameState !== 'playing') return;
+
+            monkey.update();
+
+            // Collision detection with platforms
+            platforms.forEach(p => {
+                p.update();
+                // Check for landing on a platform (skip invisible disappearing platforms)
+                if (monkey.dy > 0 && // moving down
+                    monkey.x > p.x - monkey.width / 2 && monkey.x < p.x + p.width + monkey.width / 2 &&
+                    monkey.y + monkey.height / 2 > p.y && monkey.y + monkey.height / 2 < p.y + p.height &&
+                    !(p.type === 'disappearing' && !p.isVisible)) // Can't land on invisible platforms
+                {
+                    monkey.dy = 0;
+                    monkey.y = p.y - monkey.height / 2;
+                    monkey.onPlatform = true;
+                    monkey.jumpsLeft = 2; // Reset jumps on landing
+
+                    if (p.type === 'crumbling' && p.state === 0) {
+                        p.state = 120; // 2 seconds at 60fps
+                    } else if (p.type === 'jetpack' && !p.jetpackUsed) {
+                        jetpackActive = true;
+                        jetpackTimer = JETPACK_DURATION;
+                        p.jetpackUsed = true; // Mark jetpack as used
+                    } else if (p.type === 'trampoline') {
+                        // Super bounce!
+                        monkey.dy = -JUMP_FORCE * 1.8; // 80% stronger bounce
+                        p.bounceAnimation = 20; // Start bounce animation
+                        monkey.onPlatform = false; // Ghost is launched into air
+                    }
+                }
+                
+                // Check if ghost is standing on a conveyor platform
+                if (monkey.onPlatform && p.type === 'conveyor' &&
+                    monkey.x > p.x - monkey.width / 2 && monkey.x < p.x + p.width + monkey.width / 2 &&
+                    Math.abs(monkey.y + monkey.height / 2 - p.y) < 5) // Close to platform surface
+                {
+                    monkey.x += p.conveyorDirection * p.conveyorSpeed;
+                }
+            });
+
+            // Collision with collectibles
+            collectibles.forEach((c, index) => {
+                c.update();
+                const distX = monkey.x - c.x;
+                const distY = monkey.y - c.y;
+                const dist = Math.sqrt(distX * distX + distY * distY);
+                if (dist < monkey.width / 2 + c.size / 2) {
+                    c.collected = true;
+                    if (c.type === 'banana') {
+                        bananaCount++;
+                    } else if (c.type === 'pineapple') {
+                        powerUpActive = true;
+                        powerUpTimer = POWER_UP_DURATION;
+                    }
+                }
+            });
+            collectibles = collectibles.filter(c => !c.collected);
+            
+            // Power-up timer
+            if (powerUpActive) {
+                powerUpTimer--;
+                if (powerUpTimer <= 0) {
+                    powerUpActive = false;
+                }
+            }
+            
+            // Jetpack timer
+            if (jetpackActive) {
+                jetpackTimer--;
+                if (jetpackTimer <= 0) {
+                    jetpackActive = false;
+                }
+            }
+
+            // Update camera and score
+            cameraY = Math.min(cameraY, monkey.y - canvas.height * 0.4);
+            const currentHeight = Math.max(0, Math.floor((canvas.height - monkey.y) / 10));
+            score = Math.max(score, currentHeight);
+
+            // Procedural generation
+            const topPlatformY = platforms.reduce((min, p) => Math.min(min, p.y), Infinity);
+            if (topPlatformY > cameraY + 20) {
+                // Increase spacing with height
+                const difficulty = Math.max(0, Math.floor(-topPlatformY / 500));
+                const minSpacing = Math.min(120, 60 + difficulty * 10);
+                const maxSpacing = Math.min(180, 80 + difficulty * 15);
+                const spacing = Math.random() * (maxSpacing - minSpacing) + minSpacing;
+                generatePlatform(topPlatformY - spacing);
+            }
+            
+            // Remove off-screen objects
+            platforms = platforms.filter(p => p.y < cameraY + canvas.height * 1.5);
+            collectibles = collectibles.filter(c => c.y < cameraY + canvas.height * 1.5);
+
+            // Check for game over
+            if (monkey.y > cameraY + canvas.height + 50) {
+                setGameState('gameOver');
+            }
+
+            updateScoreUI();
+        }
+
+        function draw() {
+            // Clear canvas with a base color
+            ctx.fillStyle = '#0B1426';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw stars
+            drawStars();
+
+            // Don't draw game elements if they haven't been created yet
+            if (!isInitialized) return;
+
+            // --- Draw game world relative to camera ---
+            ctx.save();
+            ctx.translate(0, -cameraY);
+
+            // Draw parallax background
+            parallaxLayers.forEach(layer => layer.draw(cameraY));
+            
+            // Draw graveyard elements (tombstones, trees, etc.)
+            drawGraveyardElements();
+
+            platforms.forEach(p => p.draw());
+            collectibles.forEach(c => c.draw());
+            monkey.draw();
+            
+            // Draw power-up effect
+            if (powerUpActive) {
+                ctx.beginPath();
+                ctx.arc(monkey.x, monkey.y, 100, 0, Math.PI * 2);
+                const gradient = ctx.createRadialGradient(monkey.x, monkey.y, 20, monkey.x, monkey.y, 100);
+                gradient.addColorStop(0, 'rgba(255, 255, 0, 0.3)');
+                gradient.addColorStop(1, 'rgba(255, 255, 0, 0)');
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            }
+            
+            // Draw jetpack effect
+            if (jetpackActive) {
+                // Jetpack flames below the ghost
+                ctx.fillStyle = '#FF6B6B';
+                ctx.fillRect(monkey.x - 8, monkey.y + monkey.height/2, 16, 15);
+                ctx.fillStyle = '#FFA500';
+                ctx.fillRect(monkey.x - 6, monkey.y + monkey.height/2 + 5, 12, 10);
+                ctx.fillStyle = '#FFFF00';
+                ctx.fillRect(monkey.x - 4, monkey.y + monkey.height/2 + 10, 8, 5);
+                
+                // Jetpack glow effect
+                ctx.beginPath();
+                ctx.arc(monkey.x, monkey.y, 60, 0, Math.PI * 2);
+                const jetpackGradient = ctx.createRadialGradient(monkey.x, monkey.y, 10, monkey.x, monkey.y, 60);
+                jetpackGradient.addColorStop(0, 'rgba(255, 107, 107, 0.4)');
+                jetpackGradient.addColorStop(1, 'rgba(255, 107, 107, 0)');
+                ctx.fillStyle = jetpackGradient;
+                ctx.fill();
+            }
+
+            ctx.restore();
+            // --- End of camera-relative drawing ---
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateScoreUI() {
+            heightScoreEl.textContent = Math.floor(score);
+            bananaScoreEl.textContent = bananaCount;
+        }
+
+        function setGameState(newState) {
+            gameState = newState;
+            if (newState === 'menu') {
+                startScreen.style.opacity = '1';
+                startScreen.style.pointerEvents = 'auto';
+                gameOverScreen.style.opacity = '0';
+                gameOverScreen.style.pointerEvents = 'none';
+                scoreDisplay.style.opacity = '0';
+                bananaDisplay.style.opacity = '0';
+            } else if (newState === 'playing') {
+                startScreen.style.opacity = '0';
+                startScreen.style.pointerEvents = 'none';
+                gameOverScreen.style.opacity = '0';
+                gameOverScreen.style.pointerEvents = 'none';
+                scoreDisplay.style.opacity = '1';
+                bananaDisplay.style.opacity = '1';
+                init();
+            } else if (newState === 'gameOver') {
+                gameOverScreen.style.opacity = '1';
+                gameOverScreen.style.pointerEvents = 'auto';
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem('jungleJumperHighScore', highScore);
+                }
+                finalHeightEl.textContent = Math.floor(score);
+                finalBananasEl.textContent = bananaCount;
+                highScoreEl.textContent = Math.floor(highScore);
+            }
+        }
+
+        // --- Event Listeners ---
+        function handleResize() {
+            const containerRect = gameContainer.getBoundingClientRect();
+            canvas.width = containerRect.width;
+            canvas.height = containerRect.height;
+            if (isInitialized && gameState !== 'playing') {
+                draw(); // Redraw menu/gameover screen on resize
+            }
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'ArrowLeft') keys.left = true;
+            if (e.key === 'ArrowRight') keys.right = true;
+            // Prevent holding down jump key
+            if (e.key === 'ArrowUp' && !keys.up) {
+                keys.up = true;
+                if (gameState === 'playing') {
+                    monkey.jump();
+                }
+            }
+        }
+
+        function handleKeyUp(e) {
+            if (e.key === 'ArrowLeft') keys.left = false;
+            if (e.key === 'ArrowRight') keys.right = false;
+            if (e.key === 'ArrowUp') keys.up = false; // Allow jumping again on next press
+        }
+
+        startButton.addEventListener('click', () => setGameState('playing'));
+        retryButton.addEventListener('click', () => setGameState('playing'));
+        
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('resize', handleResize);
+
+        // Mobile touch controls
+        function handleTouch(e) {
+            e.preventDefault();
+            if (gameState === 'playing') {
+                monkey.jump();
+            }
+        }
+
+        // Add touch event listeners
+        canvas.addEventListener('touchstart', handleTouch);
+        canvas.addEventListener('click', handleTouch); // Also handle mouse clicks for desktop
+
+        // Device orientation for tilt controls
+        function handleOrientation(e) {
+            deviceOrientation = {
+                gamma: e.gamma // Left-right tilt
+            };
+        }
+
+        // Request permission for device orientation (iOS 13+)
+        function requestOrientationPermission() {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // For Android and older iOS
+                window.addEventListener('deviceorientation', handleOrientation);
+            }
+        }
+
+        // Auto-request orientation permission on mobile
+        if (isMobile) {
+            // Request permission when user first interacts
+            document.addEventListener('touchstart', requestOrientationPermission, { once: true });
+            document.addEventListener('click', requestOrientationPermission, { once: true });
+            
+            // Show mobile controls instructions
+            const desktopControls = document.querySelector('.desktop-controls');
+            const mobileControls = document.querySelector('.mobile-controls');
+            if (desktopControls && mobileControls) {
+                desktopControls.style.display = 'none';
+                mobileControls.classList.remove('hidden');
+            }
+        }
+
+        // --- Initial Setup ---
+        handleResize();
+        init();
+        setGameState('menu');
+        gameLoop();
+    </script>
+</body>
+</html> 
