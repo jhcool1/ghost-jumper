@@ -52,17 +52,62 @@
             <div id="banana-display" class="absolute top-4 right-4 text-3xl md:text-4xl text-stroke transition-opacity duration-300 opacity-0">
                 🍌 <span id="banana-score">0</span>
             </div>
+            
+            <!-- Info Button -->
+            <button id="info-button" class="absolute top-4 left-1/2 transform -translate-x-1/2 w-10 h-10 bg-blue-500 hover:bg-blue-600 text-white text-lg rounded-full shadow-lg border-2 border-blue-700 active:border-blue-800 transition-all pointer-events-auto opacity-0" style="font-family: serif;">
+                ℹ️
+            </button>
 
             <!-- Start Screen -->
             <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50 transition-opacity duration-500">
                 <h1 class="text-6xl md:text-8xl text-yellow-300 text-stroke text-center">Ghost Jumper</h1>
                 <p class="text-xl md:text-2xl mt-4 text-center px-4" id="control-instructions">
-                    <span class="desktop-controls">Arrow Keys to Move.<br>Up Arrow to Jump (twice for double jump)!</span>
-                    <span class="mobile-controls hidden">Tilt to Move.<br>Tap to Jump (twice for double jump)!</span>
+                    <span class="desktop-controls">Arrow Keys to Move.<br>Up Arrow to Jump (double press for double jump)!</span>
+                    <span class="mobile-controls hidden">Tilt to Move.<br>Tap to Jump (double tap for double jump)!</span>
                 </p>
                 <button id="start-button" class="mt-8 px-8 py-4 bg-green-500 hover:bg-green-600 text-3xl rounded-xl shadow-lg border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all pointer-events-auto">
                     Play
                 </button>
+            </div>
+
+            <!-- Info Modal -->
+            <div id="info-modal" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-75 opacity-0 pointer-events-none transition-opacity duration-500">
+                <div class="bg-gray-800 rounded-xl p-6 max-w-sm mx-4 shadow-2xl border-2 border-gray-600">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-2xl font-bold text-yellow-300 text-stroke">Controls</h3>
+                        <button id="close-info" class="text-2xl text-gray-400 hover:text-white transition-colors">×</button>
+                    </div>
+                    
+                    <div class="text-white space-y-3 text-lg">
+                        <div class="desktop-controls">
+                            <h4 class="text-yellow-200 font-semibold">Desktop:</h4>
+                            <p>• Left/Right arrows: Move</p>
+                            <p>• Up arrow or Spacebar: Jump</p>
+                            <p>• Press twice quickly: Double jump</p>
+                        </div>
+                        
+                        <div class="mobile-controls hidden">
+                            <h4 class="text-yellow-200 font-semibold">Mobile:</h4>
+                            <p>• Tilt device: Move left/right</p>
+                            <p>• Tap screen: Jump</p>
+                            <p>• Double tap: Double jump</p>
+                        </div>
+                        
+                        <div class="pt-2 border-t border-gray-600">
+                            <h4 class="text-yellow-200 font-semibold">Platforms:</h4>
+                            <p class="text-sm">• 🚀 Jetpack boost</p>
+                            <p class="text-sm">• Pink: Super bounce</p>
+                            <p class="text-sm">• Purple: Moving/conveyor</p>
+                            <p class="text-sm">• Blue: Disappearing</p>
+                        </div>
+                        
+                        <div class="pt-2">
+                            <h4 class="text-yellow-200 font-semibold">Collectibles:</h4>
+                            <p class="text-sm">• 🍌 Bananas for points</p>
+                            <p class="text-sm">• 🍍 Banana magnet power-up</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Game Over Screen -->
@@ -91,6 +136,9 @@
         const retryButton = document.getElementById('retry-button');
         const scoreDisplay = document.getElementById('score-display');
         const bananaDisplay = document.getElementById('banana-display');
+        const infoButton = document.getElementById('info-button');
+        const infoModal = document.getElementById('info-modal');
+        const closeInfoButton = document.getElementById('close-info');
         const heightScoreEl = document.getElementById('height-score');
         const bananaScoreEl = document.getElementById('banana-score');
         const finalHeightEl = document.getElementById('final-height');
@@ -788,6 +836,8 @@
                 gameOverScreen.style.pointerEvents = 'none';
                 scoreDisplay.style.opacity = '0';
                 bananaDisplay.style.opacity = '0';
+                infoButton.style.opacity = '0';
+                hideInfoModal();
             } else if (newState === 'playing') {
                 startScreen.style.opacity = '0';
                 startScreen.style.pointerEvents = 'none';
@@ -795,10 +845,14 @@
                 gameOverScreen.style.pointerEvents = 'none';
                 scoreDisplay.style.opacity = '1';
                 bananaDisplay.style.opacity = '1';
+                infoButton.style.opacity = '1';
+                hideInfoModal();
                 init();
             } else if (newState === 'gameOver') {
                 gameOverScreen.style.opacity = '1';
                 gameOverScreen.style.pointerEvents = 'auto';
+                infoButton.style.opacity = '0';
+                hideInfoModal();
                 if (score > highScore) {
                     highScore = score;
                     localStorage.setItem('jungleJumperHighScore', highScore);
@@ -807,6 +861,16 @@
                 finalBananasEl.textContent = bananaCount;
                 highScoreEl.textContent = Math.floor(highScore);
             }
+        }
+
+        function showInfoModal() {
+            infoModal.style.opacity = '1';
+            infoModal.style.pointerEvents = 'auto';
+        }
+
+        function hideInfoModal() {
+            infoModal.style.opacity = '0';
+            infoModal.style.pointerEvents = 'none';
         }
 
         // --- Event Listeners ---
@@ -840,6 +904,8 @@
 
         startButton.addEventListener('click', () => setGameState('playing'));
         retryButton.addEventListener('click', () => setGameState('playing'));
+        infoButton.addEventListener('click', showInfoModal);
+        closeInfoButton.addEventListener('click', hideInfoModal);
         
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
